@@ -13,6 +13,11 @@ MainWindow::MainWindow(const juce::String& name)
     setContentOwned(content, true);
 
     menuBarModel.onOpenFileSelected = [this] { mainComponent->openFile(); };
+    menuBarModel.onExportFileSelected = [this] { mainComponent->exportFile(); };
+    menuBarModel.onProcessSelected = [this](ProcessType type)
+    {
+        mainComponent->handleProcessSelected(type);
+    };
     setMenuBar(&menuBarModel);
 
     centreWithSize(getWidth(), getHeight());

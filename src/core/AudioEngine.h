@@ -9,11 +9,12 @@ public:
     ~AudioEngine();
 
     bool loadFile(const juce::File& file);
+    bool exportToFile(const juce::File& destFile) const;
 
     void play();
     void pause();
     void stop();
-
+    void setPosition(double positionInSeconds);
     void setGain(float newGain);
 
     bool isPlaying() const;
@@ -21,10 +22,8 @@ public:
     double getCurrentPosition() const;
     double getSampleRate() const;
     int getNumChannels() const;
-    void setPosition(double positionInSeconds);
 
-    double lastSampleRate = 44100.0;
-    int lastNumChannels = 2;
+    juce::File getCurrentFile() const;
 
 private:
     juce::AudioFormatManager& formatManager;
@@ -34,7 +33,10 @@ private:
     juce::AudioTransportSource transportSource;
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
 
-
+    juce::File currentAudioFile;
+    double lastSampleRate = 44100.0;
+    int lastNumChannels = 2;
+    int lastBitsPerSample = 16;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioEngine)
 };

@@ -30,15 +30,68 @@ bool AudioEngine::loadFile(const juce::File& file)
     auto newReaderSource = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
 
     transportSource.stop();
-    transportSource.setSource(newReaderSource.get(),
-                               0,
-                               nullptr,
-                               reader->sampleRate);
+    transportSource.setSource(nullptr);
 
+    auto currentSetup = deviceManager.getAudioDeviceSetup();
+
+    if (currentSetup.sampleRate != reader->sampleRate)
+    {
+        currentSetup.sampleRate = reader->sampleRate;
+        const auto error = deviceManager.setAudioDeviceSetup(currentSetup, true);
+
+        if (error.isNotEmpty())
+            DBG("Could not set device sample rate to match file: " + error);
+    }
+
+    transportSource.setSource(newReaderSource.get(), 0, nullptr, reader->sampleRate);
+
+    currentAudioFile = file;
     lastSampleRate = reader->sampleRate;
     lastNumChannels = static_cast<int>(reader->numChannels);
+    lastBitsPerSample = static_cast<int>(reader->bitsPerSample);
+
     readerSource = std::move(newReaderSource);
     return true;
+}
+
+bool AudioEngine::exportToFile(const juce::File& destFile) const
+{
+    if (currentAudioFile == juce::File())
+        return false;
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(currentAudioFile));
+
+    if (reader == nullptr)
+        return false;
+
+    const auto numSamples = static_cast<int>(reader->lengthInSamples);
+
+    if (numSamples <= 0)
+        return false;
+
+    juce::AudioBuffer<float> buffer(static_cast<int>(reader->numChannels), numSamples);
+    reader->read(&buffer, 0, numSamples, 0, true, true);
+
+    destFile.deleteFile();
+
+    std::unique_ptr<juce::OutputStream> outputStream(destFile.createOutputStream());
+
+    if (outputStream == nullptr)
+        return false;
+
+    juce::WavAudioFormat wavFormat;
+
+    auto writerOptions = juce::AudioFormatWriterOptions{}
+    .withSampleRate(reader->sampleRate)
+    .withNumChannels(static_cast<int>(reader->numChannels))
+    .withBitsPerSample(static_cast<int>(reader->bitsPerSample));
+
+    auto writer = wavFormat.createWriterFor(outputStream, writerOptions);
+
+    if (writer == nullptr)
+        return false;
+
+    return writer->writeFromAudioSampleBuffer(buffer, 0, numSamples);
 }
 
 void AudioEngine::play()
@@ -96,4 +149,9 @@ double AudioEngine::getSampleRate() const
 int AudioEngine::getNumChannels() const
 {
     return lastNumChannels;
+}
+
+juce::File AudioEngine::getCurrentFile() const
+{
+    return currentAudioFile;
 }

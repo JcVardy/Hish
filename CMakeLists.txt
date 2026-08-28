@@ -32,10 +32,18 @@ target_sources(Hish
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/SpectrogramView.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/DetailsView.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ControlBar.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/NavigationBar.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/TimeRuler.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/AmplitudeRuler.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/FrequencyRuler.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/AudioEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/dsp/ProcessingEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/dsp/GainProcessor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/dsp/FIRFilterProcessor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/dsp/ConvolutionProcessor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/dsp/IIRFilterProcessor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/dsp/FilterResponseCalculator.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/FilterResponseView.cpp
 )
 
 target_link_libraries(Hish

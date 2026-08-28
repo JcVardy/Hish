@@ -1,8 +1,14 @@
 #include "FrequencyRuler.h"
 
-void FrequencyRuler::setSampleRate(double newSampleRate)
+namespace
 {
-    sampleRate = newSampleRate;
+    constexpr int outerMargin = 14;
+}
+
+void FrequencyRuler::setRange(double minHz, double maxHz)
+{
+    rangeMin = minHz;
+    rangeMax = maxHz;
     repaint();
 }
 
@@ -18,26 +24,33 @@ void FrequencyRuler::paint(juce::Graphics& g)
     auto bounds = getLocalBounds();
     g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
 
-    const double nyquist = sampleRate / 2.0;
-    if (nyquist <= 0.0)
+    const double span = rangeMax - rangeMin;
+    if (span <= 0.0)
         return;
 
-    static const double niceSteps[] = { 100.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 };
+    auto band = bounds.reduced(2);
+    band.removeFromTop(outerMargin);
+    band.removeFromBottom(outerMargin);
+
+    static const double niceSteps[] = { 10.0, 20.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 };
 
     double step = niceSteps[0];
     for (double candidate : niceSteps)
     {
         step = candidate;
-        if (static_cast<int>(nyquist / candidate) <= 12)
+        if (static_cast<int>(span / candidate) <= 12)
             break;
     }
 
     g.setColour(juce::Colours::grey);
     g.setFont(juce::FontOptions(11.0f));
 
-    for (double freq = 0.0; freq <= nyquist; freq += step)
+    const double firstTick = std::ceil(rangeMin / step) * step;
+
+    for (double freq = firstTick; freq <= rangeMax + 0.0001; freq += step)
     {
-        const auto y = bounds.getHeight() - static_cast<int>((freq / nyquist) * bounds.getHeight());
+        const auto y = band.getY() + band.getHeight()
+                        - static_cast<int>(((freq - rangeMin) / span) * band.getHeight());
 
         g.drawLine(static_cast<float>(bounds.getWidth()) - 4.0f, static_cast<float>(y),
                    static_cast<float>(bounds.getWidth()), static_cast<float>(y), 1.0f);

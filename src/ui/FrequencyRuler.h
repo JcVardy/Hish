@@ -5,12 +5,13 @@ class FrequencyRuler : public juce::Component
 {
 public:
     FrequencyRuler() = default;
-    void setSampleRate(double newSampleRate);
+    void setRange(double minHz, double maxHz);
     void paint(juce::Graphics& g) override;
 
 private:
     juce::String formatFrequency(double hz) const;
-    double sampleRate = 44100.0;
+    double rangeMin = 0.0;
+    double rangeMax = 22050.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FrequencyRuler)
 };

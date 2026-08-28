@@ -20,6 +20,8 @@ namespace
         }
         return juce::dsp::WindowingFunction<float>::hann;
     }
+
+    constexpr int dragThreshold = 4;
 }
 
 int SpectrogramView::orderForSize(int size)
@@ -46,6 +48,8 @@ void SpectrogramView::setFile(const juce::File& file)
     playheadPosition = 0.0;
     visibleStart = 0.0;
     visibleEnd = 0.0;
+    visibleFreqMin = 0.0;
+    visibleFreqMax = 0.0;
 
     startThread();
     repaint();
@@ -57,6 +61,8 @@ void SpectrogramView::clear()
     currentFile = juce::File();
     visibleStart = 0.0;
     visibleEnd = 0.0;
+    visibleFreqMin = 0.0;
+    visibleFreqMax = 0.0;
 
     {
         const juce::ScopedLock sl(imageLock);
@@ -77,6 +83,21 @@ void SpectrogramView::setVisibleRange(double startSeconds, double endSeconds)
 {
     visibleStart = startSeconds;
     visibleEnd = endSeconds;
+    repaint();
+}
+
+void SpectrogramView::setNyquist(double newNyquist)
+{
+    nyquist = juce::jmax(1.0, newNyquist);
+    visibleFreqMin = 0.0;
+    visibleFreqMax = nyquist;
+    repaint();
+}
+
+void SpectrogramView::setVisibleFrequencyRange(double minHz, double maxHz)
+{
+    visibleFreqMin = minHz;
+    visibleFreqMax = maxHz;
     repaint();
 }
 
@@ -173,44 +194,44 @@ void SpectrogramView::run()
 void SpectrogramView::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
-
     g.fillAll(juce::Colours::black);
     g.setColour(juce::Colours::grey);
     g.drawRect(bounds);
-
     juce::Image imageToDraw;
     bool imageReady = false;
-
     {
         const juce::ScopedLock sl(imageLock);
         imageReady = hasImage;
         if (imageReady)
             imageToDraw = spectrogramImage;
     }
-
     if (imageReady && fileLengthInSeconds > 0.0)
     {
         const double rangeStart = (visibleEnd > visibleStart) ? visibleStart : 0.0;
         const double rangeEnd   = (visibleEnd > visibleStart) ? visibleEnd   : fileLengthInSeconds;
-
+        const double freqMin = (visibleFreqMax > visibleFreqMin) ? visibleFreqMin : 0.0;
+        const double freqMax = (visibleFreqMax > visibleFreqMin) ? visibleFreqMax : nyquist;
         const int imgWidth  = imageToDraw.getWidth();
         const int imgHeight = imageToDraw.getHeight();
-
         const int srcX     = juce::jlimit(0, imgWidth, static_cast<int>((rangeStart / fileLengthInSeconds) * imgWidth));
         const int srcRight = juce::jlimit(0, imgWidth, static_cast<int>((rangeEnd / fileLengthInSeconds) * imgWidth));
         const int srcWidth = juce::jmax(1, srcRight - srcX);
+        const int srcY      = juce::jlimit(0, imgHeight, static_cast<int>(imgHeight * (1.0 - freqMax / nyquist)));
+        const int srcBottom = juce::jlimit(0, imgHeight, static_cast<int>(imgHeight * (1.0 - freqMin / nyquist)));
+        const int srcHeight = juce::jmax(1, srcBottom - srcY);
 
+        constexpr int outerMargin = 14;
         auto destArea = bounds.reduced(2);
+        destArea.removeFromTop(outerMargin);
+        destArea.removeFromBottom(outerMargin);
 
         g.drawImage(imageToDraw,
                     destArea.getX(), destArea.getY(), destArea.getWidth(), destArea.getHeight(),
-                    srcX, 0, srcWidth, imgHeight);
-
+                    srcX, srcY, srcWidth, srcHeight);
         if (playheadPosition >= rangeStart && playheadPosition <= rangeEnd)
         {
             const auto proportion = (playheadPosition - rangeStart) / juce::jmax(0.0001, rangeEnd - rangeStart);
             const auto x = bounds.getX() + static_cast<int>(proportion * bounds.getWidth());
-
             g.setColour(juce::Colours::red);
             g.drawLine(static_cast<float>(x), static_cast<float>(bounds.getY()),
                        static_cast<float>(x), static_cast<float>(bounds.getBottom()), 2.0f);
@@ -234,6 +255,52 @@ void SpectrogramView::resized()
 
 void SpectrogramView::mouseDown(const juce::MouseEvent& event)
 {
+    lastDragPosition = event.getPosition();
+    isDraggingPastThreshold = false;
+}
+
+void SpectrogramView::mouseDrag(const juce::MouseEvent& event)
+{
+    if (fileLengthInSeconds <= 0.0)
+        return;
+
+    if (!isDraggingPastThreshold)
+    {
+        if (event.getDistanceFromDragStart() < dragThreshold)
+            return;
+
+        isDraggingPastThreshold = true;
+        lastDragPosition = event.getPosition();
+    }
+
+    const auto pos = event.getPosition();
+    const int dx = pos.x - lastDragPosition.x;
+    const int dy = pos.y - lastDragPosition.y;
+    lastDragPosition = pos;
+
+    if (dx != 0 && onPan && getWidth() > 0)
+    {
+        const double currentSpan = (visibleEnd > visibleStart) ? (visibleEnd - visibleStart) : 0.0;
+        const double deltaTime = -(static_cast<double>(dx) / getWidth()) * currentSpan;
+        onPan(deltaTime);
+    }
+
+    if (dy != 0 && onVerticalPan && getHeight() > 0)
+    {
+        const double currentFreqSpan = (visibleFreqMax > visibleFreqMin) ? (visibleFreqMax - visibleFreqMin) : nyquist;
+        const double deltaHz = (static_cast<double>(dy) / getHeight()) * currentFreqSpan;
+        onVerticalPan(deltaHz);
+    }
+}
+
+void SpectrogramView::mouseUp(const juce::MouseEvent& event)
+{
+    if (isDraggingPastThreshold)
+    {
+        isDraggingPastThreshold = false;
+        return;
+    }
+
     if (!hasImage || fileLengthInSeconds <= 0.0)
         return;
 
@@ -257,9 +324,20 @@ void SpectrogramView::mouseWheelMove(const juce::MouseEvent& event, const juce::
         return;
 
     auto bounds = getLocalBounds();
-    const auto proportion = juce::jlimit(0.0, 1.0,
+
+    if (event.mods.isCtrlDown())
+    {
+        const auto yProportion = juce::jlimit(0.0, 1.0,
+            (event.y - bounds.getY()) / static_cast<double>(bounds.getHeight()));
+
+        if (onVerticalZoom)
+            onVerticalZoom(yProportion, wheel.deltaY);
+        return;
+    }
+
+    const auto xProportion = juce::jlimit(0.0, 1.0,
         (event.x - bounds.getX()) / static_cast<double>(bounds.getWidth()));
 
     if (onZoom)
-        onZoom(proportion, wheel.deltaY);
+        onZoom(xProportion, wheel.deltaY);
 }

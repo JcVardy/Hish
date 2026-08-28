@@ -4,6 +4,7 @@ namespace
 {
     constexpr int outerMargin = 14;
     constexpr int interChannelPadding = 10;
+    constexpr int dragThreshold = 4;
 }
 
 WaveformView::WaveformView(juce::AudioFormatManager& formatManagerToUse)
@@ -24,6 +25,8 @@ void WaveformView::setFile(const juce::File& file)
     playheadPosition = 0.0;
     visibleStart = 0.0;
     visibleEnd = 0.0;
+    verticalZoom = 1.0f;
+    panCenter = 0.0f;
     repaint();
 }
 
@@ -34,6 +37,8 @@ void WaveformView::clear()
     playheadPosition = 0.0;
     visibleStart = 0.0;
     visibleEnd = 0.0;
+    verticalZoom = 1.0f;
+    panCenter = 0.0f;
     repaint();
 }
 
@@ -47,6 +52,18 @@ void WaveformView::setVisibleRange(double startSeconds, double endSeconds)
 {
     visibleStart = startSeconds;
     visibleEnd = endSeconds;
+    repaint();
+}
+
+void WaveformView::setVerticalZoom(float newZoom)
+{
+    verticalZoom = juce::jlimit(1.0f, 20.0f, newZoom);
+    repaint();
+}
+
+void WaveformView::setPanCenter(float newPanCenter)
+{
+    panCenter = newPanCenter;
     repaint();
 }
 
@@ -81,7 +98,15 @@ void WaveformView::paint(juce::Graphics& g)
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto band = getChannelBand(ch, drawArea);
-            thumbnail.drawChannel(g, band, rangeStart, rangeEnd, ch, 1.0f);
+            const float halfHeight = band.getHeight() / 2.0f;
+            const int verticalShift = static_cast<int>(panCenter * verticalZoom * halfHeight);
+
+            auto shiftedBand = band.translated(0, verticalShift);
+
+            g.saveState();
+            g.reduceClipRegion(band);
+            thumbnail.drawChannel(g, shiftedBand, rangeStart, rangeEnd, ch, verticalZoom);
+            g.restoreState();
         }
 
         if (playheadPosition >= rangeStart && playheadPosition <= rangeEnd)
@@ -119,6 +144,57 @@ void WaveformView::setPlayheadPosition(double positionInSeconds)
 
 void WaveformView::mouseDown(const juce::MouseEvent& event)
 {
+    lastDragPosition = event.getPosition();
+    isDraggingPastThreshold = false;
+}
+
+void WaveformView::mouseDrag(const juce::MouseEvent& event)
+{
+    if (!hasFileLoaded)
+        return;
+
+    if (!isDraggingPastThreshold)
+    {
+        if (event.getDistanceFromDragStart() < dragThreshold)
+            return;
+
+        isDraggingPastThreshold = true;
+        lastDragPosition = event.getPosition();
+    }
+
+    const auto pos = event.getPosition();
+    const int dx = pos.x - lastDragPosition.x;
+    const int dy = pos.y - lastDragPosition.y;
+    lastDragPosition = pos;
+
+    if (dx != 0 && onPan && getWidth() > 0)
+    {
+        const double currentSpan = (visibleEnd > visibleStart) ? (visibleEnd - visibleStart) : 0.0;
+        const double deltaTime = -(static_cast<double>(dx) / getWidth()) * currentSpan;
+        onPan(deltaTime);
+    }
+
+    if (dy != 0 && onVerticalPan)
+    {
+        auto band = getChannelBand(0, getLocalBounds().reduced(2));
+        const float halfHeight = band.getHeight() / 2.0f;
+
+        if (halfHeight > 0.0f)
+        {
+            const double deltaAmplitude = (static_cast<double>(dy) / halfHeight) / verticalZoom;
+            onVerticalPan(deltaAmplitude);
+        }
+    }
+}
+
+void WaveformView::mouseUp(const juce::MouseEvent& event)
+{
+    if (isDraggingPastThreshold)
+    {
+        isDraggingPastThreshold = false;
+        return;
+    }
+
     if (!hasFileLoaded || thumbnail.getTotalLength() <= 0.0)
         return;
 
@@ -140,6 +216,13 @@ void WaveformView::mouseWheelMove(const juce::MouseEvent& event, const juce::Mou
 {
     if (!hasFileLoaded)
         return;
+
+    if (event.mods.isCtrlDown())
+    {
+        if (onVerticalZoom)
+            onVerticalZoom(wheel.deltaY);
+        return;
+    }
 
     auto bounds = getLocalBounds();
     const auto proportion = juce::jlimit(0.0, 1.0,
